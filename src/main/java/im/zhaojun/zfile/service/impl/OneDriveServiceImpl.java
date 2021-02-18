@@ -59,11 +59,6 @@ public class OneDriveServiceImpl extends AbstractOneDriveServiceBase implements 
     }
 
     @Override
-    public String getDownloadUrl(String path) {
-        return null;
-    }
-
-    @Override
     public StorageTypeEnum getStorageTypeEnum() {
         return StorageTypeEnum.ONE_DRIVE;
     }
