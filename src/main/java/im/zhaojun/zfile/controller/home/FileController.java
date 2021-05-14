@@ -3,10 +3,11 @@ package im.zhaojun.zfile.controller.home;
 import cn.hutool.core.util.StrUtil;
 import com.alibaba.fastjson.JSON;
 import im.zhaojun.zfile.context.DriveContext;
-import im.zhaojun.zfile.exception.NotExistFileException;
+import im.zhaojun.zfile.exception.NotEnabledDriveException;
 import im.zhaojun.zfile.exception.PasswordVerifyException;
 import im.zhaojun.zfile.model.constant.ZFileConstant;
 import im.zhaojun.zfile.model.dto.FileItemDTO;
+import im.zhaojun.zfile.model.dto.FileListDTO;
 import im.zhaojun.zfile.model.dto.SystemFrontConfigDTO;
 import im.zhaojun.zfile.model.entity.DriveConfig;
 import im.zhaojun.zfile.model.enums.StorageTypeEnum;
@@ -20,6 +21,7 @@ import im.zhaojun.zfile.util.FileComparator;
 import im.zhaojun.zfile.util.HttpUtil;
 import im.zhaojun.zfile.util.StringUtils;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -31,6 +33,7 @@ import javax.annotation.Resource;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * 前台文件管理
@@ -40,6 +43,9 @@ import java.util.Objects;
 @RequestMapping("/api")
 @RestController
 public class FileController {
+
+    @Value("${zfile.debug}")
+    private Boolean debug;
 
     @Resource
     private SystemConfigService systemConfigService;
@@ -101,42 +107,35 @@ public class FileController {
 
         // 按照自然排序
         copyList.sort(new FileComparator(orderBy, orderDirection));
-        return ResultBean.successData(copyList);
-    }
 
-    /**
-     * 获取系统配置信息和当前页的标题, 页面文档信息
-     *
-     * @param   driveId
-     *          驱动器 ID
-     *
-     * @return  返回指定驱动器的系统配置信息
-     */
-    @GetMapping("/config/{driveId}")
-    public ResultBean getConfig(@PathVariable(name = "driveId") Integer driveId, String path) {
+
+
+        // 开始获取参数信息
         SystemFrontConfigDTO systemConfig = systemConfigService.getSystemFrontConfig(driveId);
-
-        AbstractBaseFileService fileService = driveContext.get(driveId);
         DriveConfig driveConfig = driveConfigService.findById(driveId);
-        String fullPath = StringUtils.removeDuplicateSeparator(path + ZFileConstant.PATH_SEPARATOR + ZFileConstant.README_FILE_NAME);
-        FileItemDTO fileItem = null;
-        try {
-            fileItem = fileService.getFileItem(fullPath);
-
-            if (!Objects.equals(driveConfig.getType(), StorageTypeEnum.FTP)) {
-                String readme = HttpUtil.getTextContent(fileItem.getUrl());
-                systemConfig.setReadme(readme);
-            }
-        } catch (Exception e) {
-            if (e instanceof NotExistFileException) {
-                log.trace("不存在 README 文件, 已跳过, fullPath: {}, fileItem: {}", fullPath, JSON.toJSONString(fileItem));
-            } else {
-                log.trace("获取 README 文件异常, fullPath: {}, fileItem: {}", fullPath, JSON.toJSONString(fileItem), e);
-            }
+        Boolean enable = driveConfig.getEnable();
+        if (!enable) {
+            throw new NotEnabledDriveException();
         }
 
-        return ResultBean.successData(systemConfig);
+
+        systemConfig.setDebugMode(debug);
+        systemConfig.setDefaultSwitchToImgMode(driveConfig.getDefaultSwitchToImgMode());
+
+        // 如果不是 FTP 模式，则尝试获取当前文件夹中的 README 文件，有则读取，没有则停止
+        if (!Objects.equals(driveConfig.getType(), StorageTypeEnum.FTP)) {
+            fileItemList.stream()
+                    .filter(fileItemDTO -> Objects.equals(ZFileConstant.README_FILE_NAME, fileItemDTO.getName()))
+                    .findFirst()
+                    .ifPresent(fileItemDTO -> {
+                        String readme = HttpUtil.getTextContent(fileItemDTO.getUrl());
+                        systemConfig.setReadme(readme);
+                    });
+        }
+
+        return ResultBean.successData(new FileListDTO(copyList, systemConfig));
     }
+
 
     /**
      * 获取指定路径下的文件信息内容

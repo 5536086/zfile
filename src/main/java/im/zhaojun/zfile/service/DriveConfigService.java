@@ -1,5 +1,6 @@
 package im.zhaojun.zfile.service;
 
+import cn.hutool.core.collection.CollectionUtil;
 import com.alibaba.fastjson.JSONObject;
 import im.zhaojun.zfile.cache.ZFileCache;
 import im.zhaojun.zfile.context.DriveContext;
@@ -13,6 +14,8 @@ import im.zhaojun.zfile.model.entity.DriveConfig;
 import im.zhaojun.zfile.model.entity.StorageConfig;
 import im.zhaojun.zfile.model.enums.StorageTypeEnum;
 import im.zhaojun.zfile.repository.DriverConfigRepository;
+import im.zhaojun.zfile.repository.FilterConfigRepository;
+import im.zhaojun.zfile.repository.ShortLinkConfigRepository;
 import im.zhaojun.zfile.repository.StorageConfigRepository;
 import im.zhaojun.zfile.service.base.AbstractBaseFileService;
 import lombok.extern.slf4j.Slf4j;
@@ -41,6 +44,12 @@ public class DriveConfigService {
 
     @Resource
     private StorageConfigRepository storageConfigRepository;
+
+    @Resource
+    private FilterConfigRepository filterConfigRepository;
+
+    @Resource
+    private ShortLinkConfigRepository shortLinkConfigRepository;
 
     @Resource
     private DriveContext driveContext;
@@ -103,6 +112,10 @@ public class DriveConfigService {
         DriveConfigDTO driveConfigDTO = new DriveConfigDTO();
 
         List<StorageConfig> storageConfigList = storageConfigRepository.findByDriveId(driveConfig.getId());
+        Boolean defaultSwitchToImgMode = driveConfig.getDefaultSwitchToImgMode();
+        if (defaultSwitchToImgMode == null) {
+            driveConfig.setDefaultSwitchToImgMode(false);
+        }
         BeanUtils.copyProperties(driveConfig, driveConfigDTO);
 
         StorageStrategyConfig storageStrategyConfig = new StorageStrategyConfig();
@@ -179,12 +192,8 @@ public class DriveConfigService {
 
         AbstractBaseFileService storageTypeService = StorageTypeContext.getStorageTypeService(storageType);
 
-        List<StorageConfig> storageConfigList;
-        if (updateFlag) {
-            storageConfigList = storageConfigRepository.findByDriveId(driveConfigDTO.getId());
-        } else {
-            storageConfigList = storageTypeService.storageStrategyConfigList();
-        }
+        List<StorageConfig> storageConfigList = storageTypeService.storageStrategyConfigList();
+        storageConfigRepository.deleteByDriveId(driveConfigDTO.getId());
 
         for (StorageConfig storageConfig : storageConfigList) {
             String key = storageConfig.getKey();
@@ -246,8 +255,11 @@ public class DriveConfigService {
      */
     @Transactional
     public void updateId(Integer updateId, Integer newId) {
+        zFileCache.clear(updateId);
         driverConfigRepository.updateId(updateId, newId);
         storageConfigRepository.updateDriveId(updateId, newId);
+        filterConfigRepository.updateDriveId(updateId, newId);
+        shortLinkConfigRepository.updateUrlDriveId("/directlink/" + updateId, "/directlink/" + newId);
         driveContext.updateDriveId(updateId, newId);
     }
 

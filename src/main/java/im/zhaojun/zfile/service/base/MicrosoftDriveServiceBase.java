@@ -32,15 +32,32 @@ import java.util.List;
 @Slf4j
 public abstract class MicrosoftDriveServiceBase extends AbstractBaseFileService {
 
+    /**
+     * 获取根文件 API URI
+     */
     protected static final String DRIVER_ROOT_URL = "https://{graphEndPoint}/v1.0/{type}/drive/root/children";
 
+    /**
+     * 获取非根文件 API URI
+     */
     protected static final String DRIVER_ITEMS_URL = "https://{graphEndPoint}/v1.0/{type}/drive/root:{path}:/children";
 
+    /**
+     * 获取单文件 API URI
+     */
     protected static final String DRIVER_ITEM_URL = "https://{graphEndPoint}/v1.0/{type}/drive/root:{path}";
 
+    /**
+     * 根据 RefreshToken 获取 AccessToken API URI
+     */
     protected static final String AUTHENTICATE_URL = "https://{authenticateEndPoint}/common/oauth2/v2.0/token";
 
+    /**
+     * OneDrive 文件类型
+     */
     private static final String ONE_DRIVE_FILE_FLAG = "file";
+
+    protected String proxyDomain;
 
     @Resource
     @Lazy
@@ -130,7 +147,7 @@ public abstract class MicrosoftDriveServiceBase extends AbstractBaseFileService 
             try {
                 root = oneDriveRestTemplate.exchange(requestUrl, HttpMethod.GET, entity, JSONObject.class, getGraphEndPoint(), getType(), fullPath).getBody();
             } catch (HttpClientErrorException e) {
-                log.debug("调用 OneDrive 时出现了网络异常, 已尝试重新刷新 token 后再试.", e);
+                log.debug("调用 OneDrive 时出现了网络异常, 响应信息: {}, 已尝试重新刷新 token 后再试.", e.getResponseBodyAsString());
                 refreshOneDriveToken();
                 root = oneDriveRestTemplate.exchange(requestUrl, HttpMethod.GET, entity, JSONObject.class, getGraphEndPoint(), getType(), fullPath).getBody();
             }
@@ -152,7 +169,11 @@ public abstract class MicrosoftDriveServiceBase extends AbstractBaseFileService 
                 fileItemDTO.setTime(fileItem.getDate("lastModifiedDateTime"));
 
                 if (fileItem.containsKey("file")) {
-                    fileItemDTO.setUrl(fileItem.getString("@microsoft.graph.downloadUrl"));
+                    String originUrl = fileItem.getString("@microsoft.graph.downloadUrl");
+                    if (StringUtils.isNotNullOrEmpty(proxyDomain)) {
+                        originUrl = StringUtils.replaceHost(originUrl, proxyDomain);
+                    }
+                    fileItemDTO.setUrl(originUrl);
                     fileItemDTO.setType(FileTypeEnum.FILE);
                 } else {
                     fileItemDTO.setType(FileTypeEnum.FOLDER);
@@ -175,7 +196,15 @@ public abstract class MicrosoftDriveServiceBase extends AbstractBaseFileService 
         headers.set("driveId", driveId.toString());
         HttpEntity<Object> entity = new HttpEntity<>(headers);
 
-        JSONObject fileItem = oneDriveRestTemplate.exchange(DRIVER_ITEM_URL, HttpMethod.GET, entity, JSONObject.class, getGraphEndPoint(), getType(), fullPath).getBody();
+        JSONObject fileItem;
+
+        try {
+            fileItem = oneDriveRestTemplate.exchange(DRIVER_ITEM_URL, HttpMethod.GET, entity, JSONObject.class, getGraphEndPoint(), getType(), fullPath).getBody();
+        } catch (HttpClientErrorException e) {
+            log.debug("调用 OneDrive 时出现了网络异常, 响应信息: {}, 已尝试重新刷新 token 后再试.", e.getResponseBodyAsString());
+            refreshOneDriveToken();
+            fileItem = oneDriveRestTemplate.exchange(DRIVER_ITEM_URL, HttpMethod.GET, entity, JSONObject.class, getGraphEndPoint(), getType(), fullPath).getBody();
+        }
 
         if (fileItem == null) {
             return null;
@@ -241,6 +270,10 @@ public abstract class MicrosoftDriveServiceBase extends AbstractBaseFileService 
      */
     public abstract String getScope();
 
+
+    /**
+     * 刷新当前存储器 AccessToken
+     */
     public void refreshOneDriveToken() {
         OneDriveToken refreshToken = getRefreshToken();
 
